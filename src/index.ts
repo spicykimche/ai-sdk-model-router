@@ -1,10 +1,9 @@
-import {  
-  generateObject,
-  LanguageModel,
-} from "ai";
+import { generateObject } from "ai";
+import type { LanguageModel } from "ai";
 import type { 
   LanguageModelV2,
   LanguageModelV2CallOptions,
+  LanguageModelV2Message,
 } from "@ai-sdk/provider";
 import { z } from "zod";
 
@@ -43,8 +42,11 @@ export const modelRouter = (config: ModelRouterOptions): LanguageModel => {
     throw new Error("Router requires at least one model configuration");
   }
 
-  const log = (...args: any[]) => {
-    if (debug) console.log('[Router]', ...args);
+  const log = (...args: unknown[]) => {
+    if (debug) {
+      // eslint-disable-next-line no-console
+      console.log('[Router]', ...args);
+    }
   };
 
   // Create a proxy model that delegates to the selected model
@@ -79,15 +81,15 @@ export const modelRouter = (config: ModelRouterOptions): LanguageModel => {
  * Only includes tool calls that have been completed with a successful result
  */
 function extractToolCallHistory(
-  messages: any[] | undefined, 
+  messages: LanguageModelV2Message[] | undefined, 
   maxCalls: number = 10
 ): string {
   if (!messages || messages.length === 0) {
     return 'None - This is the first request';
   }
 
-  const completedToolCalls: Array<{ toolName: string; args: any }> = [];
-  const pendingToolCalls = new Map<string, { toolName: string; args: any }>();
+  const completedToolCalls: Array<{ toolName: string; args: unknown }> = [];
+  const pendingToolCalls = new Map<string, { toolName: string; args: unknown }>();
 
   // Iterate through messages to find tool calls and their results
   for (const message of messages) {
@@ -97,10 +99,10 @@ function extractToolCallHistory(
       // Track tool calls from assistant messages
       for (const part of message.content) {
         if (part.type === 'tool-call') {
-          const callId = part.toolCallId || part.id || `${part.toolName}-${Date.now()}`;
+          const callId = part.toolCallId || `${part.toolName}-${Date.now()}`;
           pendingToolCalls.set(callId, {
             toolName: part.toolName,
-            args: part.args || part.input,
+            args: 'args' in part ? (part as { args: unknown }).args : undefined,
           });
         }
       }
@@ -108,7 +110,7 @@ function extractToolCallHistory(
       // Match tool results with their calls
       for (const part of message.content) {
         if (part.type === 'tool-result') {
-          const callId = part.toolCallId || part.id;
+          const callId = part.toolCallId;
           const toolName = part.toolName;
           
           // Find the matching pending call
@@ -141,7 +143,8 @@ function extractToolCallHistory(
   // Format tool calls with their arguments
   return recentCalls
     .map((call, idx) => {
-      const argsPreview = JSON.stringify(call.args, null, 0).substring(0, 100);
+      const argsString = JSON.stringify(call.args ?? {}, null, 0);
+      const argsPreview = argsString.substring(0, 100);
       return `${idx + 1}. ${call.toolName}(${argsPreview}${argsPreview.length >= 100 ? '...' : ''})`;
     })
     .join('\n');
@@ -152,7 +155,7 @@ async function selectModel(
   models: ModelRouterConfig[],
   inputPrompt: string,
   options: LanguageModelV2CallOptions,
-  log: (...args: any[]) => void
+  log: (...args: unknown[]) => void
 ): Promise<LanguageModelV2> {
   // Extract available tools
   const availableTools = options.tools 
@@ -163,12 +166,15 @@ async function selectModel(
     : 'None';
 
   // Extract tool call history from conversation messages
-  let messages: any[] | undefined;
+  let messages: LanguageModelV2Message[] | undefined;
   
   if ('messages' in options) {
-    messages = options.messages as any[];
-  } else if ('prompt' in options && Array.isArray((options as any).prompt)) {
-    messages = (options as any).prompt;
+    messages = options.messages as LanguageModelV2Message[];
+  } else if ('prompt' in options) {
+    const promptValue = (options as { prompt?: unknown }).prompt;
+    if (Array.isArray(promptValue)) {
+      messages = promptValue as LanguageModelV2Message[];
+    }
   }
   
   const toolCallHistory = extractToolCallHistory(messages, 10);
