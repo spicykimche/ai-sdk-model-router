@@ -19,31 +19,29 @@ export interface ModelRouterConfig {
 }
 
 /**
- * Options for the router
+ * Configuration options for the model router
  */
 export interface ModelRouterOptions {
+  /** The user's original input prompt*/
+  prompt: string;
+  /** The reasoning model used to select the appropriate model */
+  reasoningModel: LanguageModel;
+  /** Array of model configurations with descriptions */
+  models: ModelRouterConfig[];
   /** Enable debug logging */
   debug?: boolean;
 }
 
 /**
  * AI SDK Model router - uses reasoning model to route to the best model
- * @param reasoningModel - The reasoning model used to select the appropriate model
- * @param models - Array of model configurations with descriptions
- * @param inputPrompt - The user's input prompt/query for model selection
- * @param options - Router configuration options
+ * @param config - Router configuration object
  */
-export const modelRouter = (
-  inputPrompt: string,
-  reasoningModel: LanguageModel,
-  models: ModelRouterConfig[],
-  options: ModelRouterOptions = {}
-): LanguageModel => {
+export const modelRouter = (config: ModelRouterOptions): LanguageModel => {
+  const { prompt, reasoningModel, models, debug = false } = config;
+  
   if (models.length === 0) {
     throw new Error("Router requires at least one model configuration");
   }
-
-  const { debug = false } = options;
 
   const log = (...args: any[]) => {
     if (debug) console.log('[Router]', ...args);
@@ -57,7 +55,7 @@ export const modelRouter = (
     supportedUrls: {},
     
     async doGenerate(options: LanguageModelV2CallOptions) {
-      const selectedModel = await selectModel(reasoningModel, models, inputPrompt, options, log);
+      const selectedModel = await selectModel(reasoningModel, models, prompt, options, log);
       log('Generating a response...');
       const result = await selectedModel.doGenerate(options);
       log('Response generated.');
@@ -65,7 +63,7 @@ export const modelRouter = (
     },
 
     async doStream(options: LanguageModelV2CallOptions) {
-      const selectedModel = await selectModel(reasoningModel, models, inputPrompt, options, log);
+      const selectedModel = await selectModel(reasoningModel, models, prompt, options, log);
       log('Starting stream...');
       const stream = selectedModel.doStream(options);
       log('Stream started.');

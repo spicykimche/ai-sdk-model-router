@@ -270,10 +270,10 @@ describe('Model Gateway', () => {
 
 Each step should build on the previous results to create a cohesive analysis.`;
 
-    const modelRouters = modelRouter(
+    const model = modelRouter({
       prompt,
-      google('gemini-2.0-flash'),
-      [
+      reasoningModel: google('gemini-2.0-flash'),
+      models: [
         {
           model: google('gemini-2.0-flash-lite'),
           description: 'Market intelligence specialist. Expert at retrieving and analyzing market data, competitor pricing, industry trends, and market dynamics.',
@@ -291,13 +291,13 @@ Each step should build on the previous results to create a cohesive analysis.`;
           description: 'Report generation specialist. Expert at creating comprehensive executive reports, formatting complex data into tables, and professional document creation.',
         },
       ],
-      { debug: true }
-    );
+      debug: true,
+    });
 
     let result;
     try {
       result = await generateText({
-        model: modelRouters,
+        model,
         prompt,
         tools: {
           getMarketData,
@@ -305,7 +305,7 @@ Each step should build on the previous results to create a cohesive analysis.`;
           generateRecommendations,
           exportExecutiveReport,
         },
-        stopWhen: stepCountIs(15)
+        stopWhen: stepCountIs(15),
       });
     } catch (error: any) {
       console.log('\n=== Error Occurred ===');
