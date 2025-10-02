@@ -28,17 +28,5 @@ module.exports = {
     node: true,
     es2022: true,
   },
-  overrides: [
-    {
-      // Disable type-checking rules for test files
-      files: ['**/*.test.ts', '**/*.spec.ts'],
-      parserOptions: {
-        project: null,
-      },
-      extends: [
-        'eslint:recommended',
-        'plugin:@typescript-eslint/recommended',
-      ],
-    },
-  ],
+  ignorePatterns: ['**/*.test.ts', '**/*.spec.ts', 'dist/', 'node_modules/'],
 };
