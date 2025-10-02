@@ -21,7 +21,7 @@ export interface ModelRouterConfig {
 /**
  * Options for the router
  */
-export interface RouterOptions {
+export interface ModelRouterOptions {
   /** Enable debug logging */
   debug?: boolean;
 }
@@ -33,11 +33,11 @@ export interface RouterOptions {
  * @param inputPrompt - The user's input prompt/query for model selection
  * @param options - Router configuration options
  */
-export const router = (
+export const modelRouter = (
+  inputPrompt: string,
   reasoningModel: LanguageModel,
   models: ModelRouterConfig[],
-  inputPrompt: string,
-  options: RouterOptions = {}
+  options: ModelRouterOptions = {}
 ): LanguageModel => {
   if (models.length === 0) {
     throw new Error("Router requires at least one model configuration");
@@ -76,6 +76,79 @@ export const router = (
   return routerModel as LanguageModel;
 };
 
+/**
+ * Extract tool call history from conversation messages
+ * Only includes tool calls that have been completed with a successful result
+ */
+function extractToolCallHistory(
+  messages: any[] | undefined, 
+  maxCalls: number = 10
+): string {
+  if (!messages || messages.length === 0) {
+    return 'None - This is the first request';
+  }
+
+  const completedToolCalls: Array<{ toolName: string; args: any }> = [];
+  const pendingToolCalls = new Map<string, { toolName: string; args: any }>();
+
+  // Iterate through messages to find tool calls and their results
+  for (const message of messages) {
+    if (!Array.isArray(message.content)) continue;
+
+    if (message.role === 'assistant') {
+      // Track tool calls from assistant messages
+      for (const part of message.content) {
+        if (part.type === 'tool-call') {
+          const callId = part.toolCallId || part.id || `${part.toolName}-${Date.now()}`;
+          pendingToolCalls.set(callId, {
+            toolName: part.toolName,
+            args: part.args || part.input,
+          });
+        }
+      }
+    } else if (message.role === 'tool') {
+      // Match tool results with their calls
+      for (const part of message.content) {
+        if (part.type === 'tool-result') {
+          const callId = part.toolCallId || part.id;
+          const toolName = part.toolName;
+          
+          // Find the matching pending call
+          if (callId && pendingToolCalls.has(callId)) {
+            const call = pendingToolCalls.get(callId)!;
+            completedToolCalls.push(call);
+            pendingToolCalls.delete(callId);
+          } else if (toolName) {
+            // Fallback: match by tool name if no ID match
+            for (const [id, call] of pendingToolCalls.entries()) {
+              if (call.toolName === toolName) {
+                completedToolCalls.push(call);
+                pendingToolCalls.delete(id);
+                break;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Take only the last N completed calls
+  const recentCalls = completedToolCalls.slice(-maxCalls);
+
+  if (recentCalls.length === 0) {
+    return 'None - No tools have been called yet';
+  }
+
+  // Format tool calls with their arguments
+  return recentCalls
+    .map((call, idx) => {
+      const argsPreview = JSON.stringify(call.args, null, 0).substring(0, 100);
+      return `${idx + 1}. ${call.toolName}(${argsPreview}${argsPreview.length >= 100 ? '...' : ''})`;
+    })
+    .join('\n');
+}
+
 async function selectModel(
   reasoningModel: LanguageModel,
   models: ModelRouterConfig[],
@@ -90,6 +163,17 @@ async function selectModel(
         return `${name}: ${description}`;
       }).join('\n')
     : 'None';
+
+  // Extract tool call history from conversation messages
+  let messages: any[] | undefined;
+  
+  if ('messages' in options) {
+    messages = options.messages as any[];
+  } else if ('prompt' in options && Array.isArray((options as any).prompt)) {
+    messages = (options as any).prompt;
+  }
+  
+  const toolCallHistory = extractToolCallHistory(messages, 10);
 
   // Build model options
   const modelOptions = models
@@ -112,15 +196,20 @@ ${inputPrompt}
 Available Tools:
 ${availableTools}
 
+Tool Call History (completed calls with successful results):
+${toolCallHistory}
+
 Available Models:
 ${modelOptions}
 
 CRITICAL INSTRUCTIONS:
 - You must select EXACTLY ONE model by number
-- Use 1-based indexing: valid numbers are 1, 2, or 3 (NEVER use 0)
+- Use 1-based indexing: valid numbers are 1 to ${models.length} (NEVER use 0)
 - Match the model's specialty to the query and available tools
-- If the query has multiple tasks, pick the model best suited for the FIRST or MOST IMPORTANT task
-- Example: If asked for weather AND financial report, and Model 1 specializes in weather, select 1
+- Consider which tools have already been called successfully
+- For sequential workflows, select the model best suited for the NEXT logical step
+- If the query has multiple tasks, pick the model best suited for the CURRENT or MOST IMPORTANT task
+- Example: If getMarketData was called, and now we need financial analysis, select the financial analysis specialist
 
 Your response MUST include a modelIndex between 1 and ${models.length}.`;
 
